@@ -68,6 +68,7 @@ var _ interface {
 } = (*Catalog)(nil)
 
 func DefaultCatalog() Catalog {
+	cfg := syft.DefaultCreateSBOMConfig()
 	return Catalog{
 		Compliance:    defaultComplianceConfig(),
 		Scope:         source.SquashedScope.String(),
@@ -81,7 +82,7 @@ func DefaultCatalog() Catalog {
 		Relationships: defaultRelationshipsConfig(),
 		Unknowns:      defaultUnknowns(),
 		Source:        defaultSourceConfig(),
-		Parallelism:   1,
+		Parallelism:   cfg.Parallelism,
 	}
 }
 
@@ -167,7 +168,9 @@ func (cfg Catalog) ToPackagesConfig() pkgcataloging.Config {
 	return pkgcataloging.Config{
 		Binary: binary.DefaultClassifierCatalogerConfig(),
 		Dotnet: dotnet.DefaultCatalogerConfig().
-			WithCertificateValidation(cfg.Dotnet.EnableCertificateValidation),
+			WithDepPackagesMustHaveDLL(cfg.Dotnet.DepPackagesMustHaveDLL).
+			WithDepPackagesMustClaimDLL(cfg.Dotnet.DepPackagesMustClaimDLL).
+			WithRelaxDLLClaimsWhenBundlingDetected(cfg.Dotnet.RelaxDLLClaimsWhenBundlingDetected),
 		Golang: golang.DefaultCatalogerConfig().
 			WithSearchLocalModCacheLicenses(*multiLevelOption(false, enrichmentEnabled(cfg.Enrich, task.Go, task.Golang), cfg.Golang.SearchLocalModCacheLicenses)).
 			WithLocalModCacheDir(cfg.Golang.LocalModCacheDir).
@@ -222,6 +225,9 @@ func (cfg *Catalog) AddFlags(flags clio.FlagSet) {
 	flags.StringArrayVarP(&cfg.Catalogers, "catalogers", "",
 		"enable one or more package catalogers")
 
+	flags.IntVarP(&cfg.Parallelism, "parallelism", "",
+		"number of cataloger workers to run in parallel")
+
 	if pfp, ok := flags.(fangs.PFlagSetProvider); ok {
 		if err := pfp.PFlagSet().MarkDeprecated("catalogers", "use: override-default-catalogers and select-catalogers"); err != nil {
 			panic(err)
@@ -250,7 +256,8 @@ func (cfg *Catalog) AddFlags(flags clio.FlagSet) {
 }
 
 func (cfg *Catalog) DescribeFields(descriptions fangs.FieldDescriptionSet) {
-	descriptions.Add(&cfg.Parallelism, "number of cataloger workers to run in parallel")
+	descriptions.Add(&cfg.Parallelism, `number of cataloger workers to run in parallel
+by default, when set to 0: this will be based on runtime.NumCPU * 4, if set to less than 0 it will be unbounded`)
 
 	descriptions.Add(&cfg.Enrich, fmt.Sprintf(`Enable data enrichment operations, which can utilize services such as Maven Central and NPM.
 By default all enrichment is disabled, use: all to enable everything.
